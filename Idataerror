@@ -1,0 +1,497 @@
+using Decriptor.AdminPanel.Models;
+using Decriptor.AdminPanel.Models.Services;
+using Decriptor.AdminPanel.ViewModels.Helpers;
+using Decriptor.AdminPanel.ViewModels.Messages.ApplicationTemplateDirectory;
+using Decriptor.Domain.Aggregates.Specification;
+using Decriptor.Domain.DataTransferObjects;
+using Decriptor.Domain.Models.ApplicationTemplateDirectory;
+using GalaSoft.MvvmLight;
+using GalaSoft.MvvmLight.Command;
+using NLog;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows.Input;
+
+namespace Decriptor.AdminPanel.ViewModels.Controls.Sections.ApplicationTemplateDirectory
+{
+    public class ApplicationTemplateDirectoryEditorViewModel : ViewModelBase, INavigationAware, IDataErrorInfo
+    {
+        private ILogger _logger = LogManager.GetCurrentClassLogger();
+        private IDataService _dataService;
+        private ReasonTemplate _reasonTemplate;
+
+        private ObservableCollection<ReasonTemplateTag> _tags;
+
+        private Action<ReasonTemplate, IEnumerable<MukCustomerReasonRelationships>> _okCallback;
+        private Action _cancelCallback;
+
+        private int _cursorPosition;
+        private string _template;
+        private string _titleReasonTemplate;
+
+        private Approver _approver;
+
+        private IEnumerable<MukCustomerReasonRelationships> _mukCustomerReason;
+        private IEnumerable<Customer> _customers;
+        private IEnumerable<string> _mukDocumentsNames;
+        private IEnumerable<MukDocument> _mukDocuments;
+
+        private ObservableCollection<Customer> _customerSelected;
+        private ObservableCollection<string> _mukItemSelected;
+
+        private bool _isExistenceTemplate;
+        private bool _isErrorValidate;
+
+        public ApplicationTemplateDirectoryEditorViewModel(IDataService dataService)
+        {
+            _dataService = dataService;
+            this.Approver = new Approver();
+        }
+
+        #region Commands
+        public ICommand OkCommand => new RelayCommand(() =>
+        {
+            _reasonTemplate.ApproverName = Approver.Name;
+            _reasonTemplate.Position = Approver.Position;
+            _reasonTemplate.TitleReasonTemplate = TitleReasonTemplate;
+            _reasonTemplate.Template = Template;
+
+            var mukCustomerReasonRelationships = FillingMukCustomerReasonModel();
+
+            _okCallback.Invoke(_reasonTemplate, mukCustomerReasonRelationships);
+            MessengerInstance?.Send(new DoCloseApplicationTemplateDirectoryEditorWindow());
+        });
+
+        public ICommand CancelCommand => new RelayCommand(() =>
+        {
+            RaisePropertyChanged(nameof(_reasonTemplate));
+            _cancelCallback.Invoke();
+            if (MessengerInstance != null)
+                MessengerInstance.Send(new DoCloseApplicationTemplateDirectoryEditorWindow());
+        });
+
+        public ICommand PasteTagsCommand => new RelayCommand<ReasonTemplateTag>((ReasonTemplateTag tag) => 
+        {
+            Template = Template.Insert(CursorPosition, tag.NameTag);
+        });
+        #endregion
+
+        #region Properties
+        public string Error => throw new NotImplementedException();
+
+        public string this[string columnName]
+        {
+            get
+            {
+                string error = string.Empty;
+                switch (columnName)
+                {
+                    case nameof(Template):
+                        ValidateAttributes();
+
+                        error = string.IsNullOrWhiteSpace(Template) ? "Поле не должно быть пустым" : "";
+                        break;
+                }
+
+                return error;
+            }
+        }
+        public ObservableCollection<Customer> CustomerSelected 
+        { 
+            get => _customerSelected; 
+            set => Set(ref _customerSelected, value); 
+        }
+        public ObservableCollection<string> MukItemSelected 
+        { 
+            get => _mukItemSelected; set => Set(ref _mukItemSelected, value); }
+
+        public string TitleReasonTemplate
+        {
+            get => _titleReasonTemplate;
+            set => Set(ref _titleReasonTemplate, value);
+        }
+
+        public int CursorPosition 
+        {
+            get => _cursorPosition;
+            set => Set(ref _cursorPosition, value);
+        }
+
+        public ObservableCollection<ReasonTemplateTag> Tags
+        {
+            get => _tags;
+            set => Set(ref _tags, value);
+        }
+
+        public IEnumerable<Customer> Customers 
+        { 
+            get=> _customers;
+            set => Set(ref _customers, value); 
+        } 
+        public IEnumerable<string> MukDocumentsNames 
+        {
+            get => _mukDocumentsNames; 
+            set => Set(ref _mukDocumentsNames, value); 
+        }
+     
+        public Approver Approver 
+        { 
+            get => _approver; 
+            set => Set(ref _approver, value); 
+        }
+
+        public string Template
+        {
+            get => _template;
+            set => Set(ref _template, value);
+        }
+
+        public bool IsActiveButton => !(IsExistenceTemplate || _isErrorValidate);
+
+        public bool IsExistenceTemplate 
+        { 
+            get => _isExistenceTemplate;
+            set
+            {
+                Set(ref _isExistenceTemplate, value);
+                RaisePropertyChanged(nameof(IsActiveButton));
+            }
+        }
+        #endregion
+
+        #region Methods
+        private List<MukCustomerReasonRelationships> FillingMukCustomerReasonModel()
+        {
+            var mukCustomers = new List<MukCustomerReasonRelationships>();
+            foreach (var muk in MukItemSelected)
+            {
+                foreach (var customer in CustomerSelected)
+                {
+                    mukCustomers.Add(new MukCustomerReasonRelationships
+                    {
+                        CustomerId = customer.Id,
+                        MukName = muk
+                    });
+                }
+            }
+
+            return mukCustomers;
+        }
+
+        private void ValidateAttributes()
+        {
+            if (string.IsNullOrWhiteSpace(Template) ||
+                string.IsNullOrWhiteSpace(this.Approver.Name) ||
+                string.IsNullOrWhiteSpace(this.Approver.Position))
+                _isErrorValidate = true;
+            else
+                _isErrorValidate = false;
+        }
+
+        private void CheckingForExistenceTemplate()
+        {
+            
+            //if (_mukCustomerReason != null)
+            //    currentTemplate = _mukCustomerReason.FirstOrDefault(p => p.MukName == && p.CustomerId == CustomerId);
+
+            //if (currentTemplate == null)
+            //    IsExistenceTemplate = false;
+            //else if (currentTemplate.MukName.Equals(MukName) &&
+            //    currentTemplate.CustomerId.Equals(CustomerId) &&
+            //    !currentTemplate.MukName.Equals(ReasonTemplate.MukName) &&
+            //    !currentTemplate.CustomerId.Equals(ReasonTemplate.CustomerId))
+            //    IsExistenceTemplate = true;
+            //else
+            //    IsExistenceTemplate = false;
+        }
+
+        private void FillingTags()
+        {
+            Tags = new ObservableCollection<ReasonTemplateTag>()
+            {
+                new ReasonTemplateTag()
+                {
+                    NameTag = "[ИмяПроекта]"
+                },
+                new ReasonTemplateTag()
+                {
+                    NameTag = "[НомерМук]"
+                },
+                new ReasonTemplateTag()
+                {
+                    NameTag = "[ИмяМтр]"
+                },
+                new ReasonTemplateTag()
+                {
+                    NameTag = "[ИмяМук]"
+                },
+                new ReasonTemplateTag()
+                {
+                    NameTag = "[ВерсияМук]"
+                },
+                new ReasonTemplateTag()
+                {
+                    NameTag = "[ПараметрыБлиж]"
+                },
+                new ReasonTemplateTag()
+                {
+                    NameTag = "[Модификации]"
+                }
+            };
+            int countParameters = 1;
+
+            if (MukItemSelected != null)
+            {
+                foreach (var mukItem in MukItemSelected)
+                {
+                    var mukDoc = _mukDocuments.FirstOrDefault(p => p.Name == mukItem);
+
+                    if (mukDoc != null)
+                    {
+                        int countParametersMax = _dataService.GetMukTableInfoDtoList(mukDoc.Id).Select(p => p.Fields.Count()).Max();
+                        if (countParametersMax > countParameters)
+                        {
+                            for (int i = countParameters + 1; i <= countParametersMax; i++)
+                            {
+                                Tags.Add(new ReasonTemplateTag
+                                {
+                                    NameTag = $"[Пар{i}]"
+                                });
+                            }
+                            countParameters = countParametersMax;
+                        }
+                    }
+                }
+            }
+        }
+
+        private void ValidateApprover(object sender, PropertyChangedEventArgs e)
+        {
+            RaisePropertyChanged(nameof(Approver));
+            CheckingForExistenceTemplate();
+            ValidateAttributes();
+        }
+       
+        public async Task OnNavigatedTo(NavigationParameters parameters)
+        {
+            _mukDocuments = await _dataService.GetMukDocumentsAsync();
+            Customers = (IEnumerable<Customer>)parameters["customers"];
+            MukDocumentsNames = (IEnumerable<string>)parameters["mukNames"];
+
+            _okCallback = (Action<ReasonTemplate, IEnumerable<MukCustomerReasonRelationships>>)parameters["okCallback"];
+            _cancelCallback = (Action)parameters["cancelCallback"];
+
+            CustomerSelected = new ObservableCollection<Customer>();
+            MukItemSelected = new ObservableCollection<string>();
+
+            MukItemSelected.CollectionChanged += (s, e) => RaisePropertyChanged(nameof(MukItemSelected));
+            CustomerSelected.CollectionChanged += (s, e) => RaisePropertyChanged(nameof(CustomerSelected));
+
+            this.Approver.PropertyChanged += ValidateApprover;
+
+            if ((bool)parameters["isCreate"])
+            {
+                _reasonTemplate = new ReasonTemplate();
+                this.Approver.Name = "";
+                this.Approver.Position = "";
+                Template = "";
+                TitleReasonTemplate = "";
+            }
+            else
+            {
+                _reasonTemplate = (ReasonTemplate)parameters["reasontemplate"];
+                this.Approver.Name = _reasonTemplate.ApproverName;
+                this.Approver.Position = _reasonTemplate.Position;
+                Template = _reasonTemplate.Template;
+                TitleReasonTemplate = _reasonTemplate.TitleReasonTemplate;
+
+                _mukCustomerReason = await _dataService.GetMukCustomerReasonsRelationshipsByIdAsync(_reasonTemplate.Id);
+
+                foreach (var item in _mukCustomerReason)
+                {
+                    if(MukItemSelected.FirstOrDefault(a => a == item.MukName) == null)
+                        MukItemSelected.Add(item.MukName);
+                    if(CustomerSelected.FirstOrDefault(a => a.Id == item.CustomerId) == null)
+                        CustomerSelected.Add(_customers.FirstOrDefault(a => a.Id == item.CustomerId));
+                }
+            }
+
+            FillingTags();
+            MukItemSelected.CollectionChanged += (s, e) => 
+            { 
+                RaisePropertyChanged(nameof(MukItemSelected));
+                FillingTags();
+            };
+            RaisePropertyChanged(nameof(ReasonTemplate));
+            CheckingForExistenceTemplate();
+        }
+        #endregion
+    }
+}
+
+<Window x:Class="Decriptor.AdminPanel.Views.Controls.Sections.ApplicationTemplateDirectory.ApplicationTemplateDirectoryEditor"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:Decriptor.AdminPanel.Views.Controls.Sections.ApplicationTemplateDirectory"
+             xmlns:model="clr-namespace:Decriptor.AdminPanel.Models" 
+             xmlns:xctk="http://schemas.xceed.com/wpf/xaml/toolkit"
+             mc:Ignorable="d" 
+             xmlns:cursor="clr-namespace:Decriptor.AdminPanel.ViewModels.Controls.Sections.ApplicationTemplateDirectory.Tools" xmlns:xctk1="http://schemas.xceed.com/wpf/xaml/toolkit"
+             Title="Редактирование шаблона"
+             d:DesignHeight="450" d:DesignWidth="500"
+             DataContext="{Binding Source={StaticResource Locator}, Path=ApplicationTemplateDirectoryEditor}">
+    <Grid>
+        <Grid.Resources>
+            <Style x:Key="HeaderTextBlockStyle" TargetType="{x:Type TextBlock}"
+                   BasedOn="{StaticResource MahApps.Styles.TextBlock}">
+                <Setter Property="Focusable" Value="False"/>
+                <Setter Property="Foreground" Value="{StaticResource MahApps.Brushes.AccentBase}"/>
+                <Setter Property="FontFamily" Value="Segoe UI Symbol"/>
+                <Setter Property="FontSize" Value="12"/>
+                <Setter Property="Margin" Value="0 12 0 0"/>
+            </Style>
+            <Style x:Key="ParameterTextBoxStyle" TargetType="{x:Type TextBox}"
+                   BasedOn="{StaticResource MahApps.Styles.TextBox}">
+                <Setter Property="FontFamily" Value="Segoe UI Symbol"/>
+                <Setter Property="FontSize" Value="14"/>
+                <Setter Property="Margin" Value="0 4 0 0"/>
+            </Style>
+
+            <Style x:Key="approverInError" TargetType="{x:Type ContentControl}">
+                <Style.Triggers>
+                    <Trigger Property="Validation.HasError" Value="true">
+                        <Setter Property="ToolTip"
+                                Value="{Binding RelativeSource={x:Static RelativeSource.Self}, Path=(Validation.Errors)[0].ErrorContent}"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+            
+            <DataTemplate x:Key="Approver" DataType="{x:Type model:Approver}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="160"/>
+                        <ColumnDefinition/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition/>
+                        <RowDefinition/>
+                    </Grid.RowDefinitions>
+
+                    <Label Content="ФИО:"
+                        Grid.Column="0" Grid.Row="0"
+                        Margin="5 5 10 5"/>
+                    <TextBox Grid.Column="1" Grid.Row="0"
+                                Style="{StaticResource ParameterTextBoxStyle}"
+                                TextWrapping="Wrap" Margin="5 5 10 5"
+                        Text="{Binding Name, ValidatesOnDataErrors=True, UpdateSourceTrigger=PropertyChanged}"/>
+
+                    <Label Content="Должность"
+                            Grid.Column="0" Grid.Row="1" 
+                           Margin="5 5 10 5"/>
+                    <TextBox Grid.Row="1" Grid.Column="1"
+                            Style="{StaticResource ParameterTextBoxStyle}"
+                            TextWrapping="Wrap" Margin="5 5 10 5"
+                            Text="{Binding Position, ValidatesOnDataErrors=True}"/>
+
+                </Grid>
+            </DataTemplate>
+        </Grid.Resources>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition/>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="140"/>
+                <RowDefinition Height="40"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="170"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Label Content="Название шаблона: " Grid.Row="0" Grid.Column="0" Margin="5 5 10 5"/>
+            <TextBox Grid.Row="0" Grid.Column="1" Style="{StaticResource ParameterTextBoxStyle}"
+                     Margin="5 5 10 5" Text="{Binding TitleReasonTemplate}"/>
+            <Label Content="Шаблон основания:"
+                   Grid.Column="0" Grid.Row="1" Margin="5 5 10 5"/>
+            <TextBox x:Name="tbTemplate" Grid.Column="1" Grid.Row="1"
+                        Style="{StaticResource ParameterTextBoxStyle}"
+                        TextWrapping="Wrap" Margin="5 5 10 5"
+                        cursor:TextBoxBehaviors.Attach="True"
+                        cursor:TextBoxBehaviors.CaretIndex="{Binding CursorPosition, Mode=TwoWay}"
+                        Text="{Binding Template, ValidatesOnDataErrors=True, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}">
+                
+                <TextBox.ContextMenu>
+                    <ContextMenu ItemsSource="{Binding Tags, UpdateSourceTrigger=PropertyChanged}">
+                        <ContextMenu.ItemContainerStyle>
+                            <Style TargetType="{x:Type MenuItem}">
+                                <Setter Property="Header" Value="{Binding NameTag, UpdateSourceTrigger=PropertyChanged}"/>
+                                <Setter Property="Command" 
+                                    Value="{Binding RelativeSource={RelativeSource Mode=FindAncestor, 
+                                    AncestorType=ContextMenu}, 
+                                    Path=DataContext.PasteTagsCommand}"/>
+                                <Setter Property="CommandParameter" 
+                                        Value="{Binding }"/>
+                            </Style>
+                        </ContextMenu.ItemContainerStyle>
+                    </ContextMenu>
+                </TextBox.ContextMenu>
+            </TextBox>
+
+            <Label Content="Заказчик: " 
+                   Grid.Column="0" Grid.Row="2" Margin="5 5 10 5"/>
+
+            <xctk:CheckComboBox Grid.Row="2" Grid.Column="1" 
+                                Margin="5 5 10 5"
+                                ItemsSource="{Binding Customers, ValidatesOnDataErrors=True, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}"
+                                DisplayMemberPath="Name"
+                                SelectedItemsOverride="{Binding CustomerSelected}"
+                                IsEditable="False"
+                                VerticalAlignment="Top"/>
+
+            <Label Content="Номер МУК" 
+                   Grid.Column="0" Grid.Row="3"
+                   Margin="5 5 10 5"/>
+            <xctk:CheckComboBox Grid.Row="3" Grid.Column="1" 
+                    Margin="5 5 10 5"
+                    ItemsSource="{Binding MukDocumentsNames, ValidatesOnDataErrors=True, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}"
+                    SelectedItemsOverride="{Binding MukItemSelected}"
+                    IsEditable="False"
+                    VerticalAlignment="Top"/>
+
+            <GroupBox Grid.ColumnSpan="2" Grid.Row="4" 
+                      Header="Согласующий от Департамента №1"
+                      Margin="5 5 10 5">
+                <ContentControl Style="{StaticResource approverInError}" 
+                                ContentTemplate="{StaticResource Approver}"
+                                Content="{Binding Approver, ValidatesOnDataErrors=True, UpdateSourceTrigger=PropertyChanged}"/>
+            </GroupBox>
+            
+
+            <StackPanel Grid.Row="5" Grid.ColumnSpan="2"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Center">
+                <Button Margin="0 0 4 4" 
+                        Style="{StaticResource SpecCheckerFlatButtonStyle}"
+                        Command="{Binding OkCommand}"
+                        IsEnabled="{Binding IsActiveButton, UpdateSourceTrigger=PropertyChanged}">
+                    <TextBlock FontFamily="Segoe UI Symbol" FontSize="12" Text="Сохранить"/>
+                </Button>
+                <Button Margin="36 0 0 4"
+                        Style="{StaticResource SpecCheckerFlatButtonStyle}"
+                        Command="{Binding CancelCommand}">
+                    <TextBlock FontFamily="Segoe UI Symbol" FontSize="12" Text="Отмена"/>
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
+Вот мои ViewModal и View в textbox шаблон основания не работает валидация, но если во время запуска приложения что нибудь изменю во view то отображается красная рамка и ошибка что поле пустое. В чем дело
